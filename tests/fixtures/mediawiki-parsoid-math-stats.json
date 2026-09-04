@@ -1,14 +1,24 @@
 {
-  "articles_fully_native": 3,
-  "articles_requiring_fallback": 4,
-  "articles_total": 7,
+  "articles_fully_native": 21,
+  "articles_requiring_fallback": 14,
+  "articles_total": 35,
   "conversion_errors": 0,
   "conversion_errors_percent": 0.0,
   "dictionaries_requiring_mathjax": 1,
   "dictionaries_without_mathjax": 0,
-  "mathjax_fallback": 11,
-  "mathjax_fallback_percent": 1.53,
-  "native_success": 707,
-  "native_success_percent": 98.47,
-  "total_formulas": 718
+  "mathjax_fallback": 61,
+  "mathjax_fallback_percent": 4.05,
+  "native_success": 1445,
+  "native_success_percent": 95.95,
+  "top_fallback_reasons": {
+    "begin": 33,
+    "ce": 18,
+    "frac": 3,
+    "left": 1,
+    "mathbf": 1,
+    "overset": 1,
+    "quad": 1,
+    "underset": 3
+  },
+  "total_formulas": 1506
 }

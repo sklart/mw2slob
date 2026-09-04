@@ -2,10 +2,13 @@
 
 import argparse
 import json
+import re
 from collections import defaultdict
 from pathlib import Path
 
 from mw2slob import convert
+
+COMMAND = re.compile(r"\\([A-Za-z]+)")
 
 
 def convert_element(element):
@@ -19,6 +22,7 @@ def convert_element(element):
 def analyze(records):
     totals = {"total_formulas": 0, "native_success": 0, "mathjax_fallback": 0, "conversion_errors": 0}
     article_fallback = defaultdict(bool)
+    fallback_reasons = defaultdict(int)
     articles = set()
     for record in records:
         totals["total_formulas"] += 1
@@ -32,6 +36,8 @@ def analyze(records):
             if convert.MATH_JAX_SCRIPTS in result:
                 totals["mathjax_fallback"] += 1
                 article_fallback[record["article"]] = True
+                command = COMMAND.search(record["tex"])
+                fallback_reasons[command.group(1) if command else "unclassified"] += 1
             elif "<math" in result:
                 totals["native_success"] += 1
             else:
@@ -46,6 +52,8 @@ def analyze(records):
     totals["articles_fully_native"] = len(articles) - totals["articles_requiring_fallback"]
     totals["dictionaries_requiring_mathjax"] = 1 if totals["articles_requiring_fallback"] else 0
     totals["dictionaries_without_mathjax"] = 1 - totals["dictionaries_requiring_mathjax"]
+    totals["top_fallback_reasons"] = dict(sorted(
+        fallback_reasons.items(), key=lambda item: (-item[1], item[0]))[:10])
     return totals
 
 

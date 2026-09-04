@@ -41,7 +41,21 @@ assessment.
 
 ## Real MediaWiki compatibility corpus
 
-`tests/fixtures/mediawiki-parsoid-math.jsonl` contains 718 original
+The production-readiness source of truth is a local Enterprise/Parsoid dump:
+`tools/extract_local_parsoid_math_corpus.py DUMP.jsonl --per-article-limit 60`.
+It accepts Enterprise `name` + `article_body.html` JSONL or standalone HTML,
+stores original math HTML/TeX/inline-block metadata, deduplicates formulae,
+and resumes by skipping articles already written. REST collection remains only
+an optional seed (`tools/collect_wikimedia_math_corpus.py`) because Wikimedia
+rate limits make it unsuitable for the 3,000–5,000 formula production sample.
+Run `tools/analyze_native_math_corpus.py` after extraction to produce full
+pipeline totals and top fallback commands.
+
+Android/WebView visual validation is **blocked by environment**: this host has
+no `adb` or Android emulator. It remains a separate acceptance block; the
+production MathJax default is unchanged.
+
+`tests/fixtures/mediawiki-parsoid-math.jsonl` currently contains 1,506 original
 `span.mwe-math-element` fragments collected from public Wikimedia Parsoid HTML
 endpoints. Each record retains its source URL, article title, original HTML and
 `data-mw.body.extsrc`; `tools/collect_wikimedia_math_corpus.py` reproduces the
@@ -54,14 +68,17 @@ The current committed result is:
 
 | result | formulas | share |
 | --- | ---: | ---: |
-| native success | 707 | 98.47% |
-| MathJax fallback | 11 | 1.53% |
+| native success | 1,445 | 95.95% |
+| MathJax fallback | 61 | 4.05% |
 | conversion error | 0 | 0.00% |
 
-The sample spans seven source articles: four require a fallback and three are
-fully native. The complete corpus as one dictionary therefore requires MathJax
-assets (1/1 dictionaries), while its three all-native source-article subsets
-can be built without them. Real inline/block fixtures are checked through the
+This REST seed spans 35 source articles: 14 require a fallback and 21 are
+fully native. It remains below the production-readiness target of 3,000–5,000
+formulae and 50+ articles; the local-dump extractor above is the required path
+to finish that sample. The complete seed as one dictionary therefore requires
+MathJax assets (1/1 dictionaries), while its all-native source-article subsets
+can be built without them. The most frequent fallback commands are `begin`
+(33) and `ce` (18). Real inline/block fixtures are checked through the
 full `convert()` path, and a `jobs=1` end-to-end SLOB test builds an actual
 `\ce{H2O}` fallback article and verifies its MathJax assets.
 
