@@ -92,6 +92,8 @@ def articles(
                         aliases=aliases,
                         text=row.doc["parse"]["text"]["*"],
                     )
+                except KeyboardInterrupt:
+                    raise
                 except Exception:
                     log.exception(repr(row.doc))
                     result = mk_params(

@@ -131,22 +131,29 @@ def run(
     html_encoding: str,
     reporter=None,
     stats=None,
+    jobs=None,
+    chunksize=100,
+    verbose=False,
+    source=None,
 ):
     stats = stats or Stats()
     pool = multiprocessing.Pool(
-        None,
+        jobs,
         process_initializer,
         [filters, interwikimap, namespaces],
     )
     html_content_type = HTML_CHARSET_TMPL.format(html_encoding)
     try:
-        resulti = pool.imap_unordered(safe_convert, articles, chunksize=100)
+        resulti = pool.imap_unordered(safe_convert, articles, chunksize=chunksize)
         for title, aliases, text, error in resulti:
+            stats.processed += 1
             if error:
                 failure = ConversionError(error)
                 stats.conversion_errors += 1
                 if reporter:
-                    reporter.record("conversion", failure, title)
+                    reporter.record("convert", failure, title, source=source)
+                if verbose:
+                    p("E {}\n".format(title))
             else:
                 if text:
                     keys = [title]
@@ -158,24 +165,30 @@ def run(
                         stats.writer_errors += 1
                         failure = WriterError("failed to write {!r}: {}".format(title, error))
                         if reporter:
-                            reporter.record("writer", failure, title)
+                            reporter.record("write", failure, title, source=source)
                         raise failure from error
                     stats.written += 1
+                    if verbose:
+                        p("S {}\n".format(title))
                 else:
                     stats.empty += 1
+                    if verbose:
+                        p("F {}\n".format(title))
     except KeyboardInterrupt:
-        log.warn("User interrupted")
+        log.warning("User interrupted")
         raise
     except Exception as error:
         if not isinstance(error, (ConversionError, WriterError)):
             stats.source_errors += 1
             failure = SourceError("source iteration failed: {}".format(error))
             if reporter:
-                reporter.record("source", failure)
+                reporter.record("source", failure, source=source)
             raise failure from error
         raise
     finally:
         pool.terminate()
+        pool.join()
+    return stats
 
 
 def create_slob(
@@ -193,6 +206,9 @@ def create_slob(
     filters: Iterable[str] = (),
     reporter=None,
     stats=None,
+    jobs=None,
+    chunksize=100,
+    verbose=False,
 ):
     stats = stats or Stats()
     slb = slob.create(
@@ -218,7 +234,8 @@ def create_slob(
                 slb.tag(name, value)
 
         run(slb, articles, filters, info.interwikimap, info.namespaces, html_encoding,
-            reporter=reporter, stats=stats)
+            reporter=reporter, stats=stats, jobs=jobs, chunksize=chunksize,
+            verbose=verbose, source=info.server)
 
         include_built_in = {"js", "css", "images"}
 
@@ -243,6 +260,7 @@ def create_slob(
     finally:
         if not getattr(slb, "_finalized", False):
             slb.tmpdir.cleanup()
-        p("\n{}\n".format(stats.summary()))
+        elapsed = time.time() - times.get("all", time.time())
+        p("\n{}\n".format(stats.summary(elapsed)))
         p("All done in %s\n" % end("all"))
     return stats

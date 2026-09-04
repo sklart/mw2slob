@@ -9,7 +9,7 @@ from . import core
 from . import dump
 from . import scrape
 from . import siteinfo
-from .reliability import ErrorReporter, Stats
+from .reliability import ErrorReporter, SourceError, Stats, WriterError
 
 
 def cli_siteinfo(args):
@@ -72,7 +72,8 @@ def run(outname, info, articles, args):
             compression=args.compression, workdir=args.workdir,
             min_bin_size=args.bin_size, no_math=args.no_math,
             html_encoding=args.html_encoding, tags=tags, filters=filters,
-            reporter=reporter, stats=Stats(),
+            reporter=reporter, stats=Stats(), jobs=args.jobs,
+            chunksize=args.chunksize, verbose=args.verbose,
         )
 
 
@@ -86,7 +87,7 @@ def cli_dump(args):
         if name.startswith("http://") or name.startswith("https://"):
             try:
                 scrape.mkcouch(name)  # validate url actually points to existing db
-            except:
+            except Exception:
                 logging.getLogger(__loader__.name).error(f"Invalid CouchDB URL: {name}")
                 raise
             else:
@@ -129,6 +130,13 @@ def default_filter_dir():
     return os.path.join(os.path.dirname(__file__), "filters")
 
 
+def positive_int(value):
+    result = int(value)
+    if result <= 0:
+        raise argparse.ArgumentTypeError("must be greater than zero")
+    return result
+
+
 def arg_parser():
     arg_parser = argparse.ArgumentParser()
     arg_parser.add_argument(
@@ -153,8 +161,21 @@ def arg_parser():
     )
 
     base_parser.add_argument(
-        "--errors-file", default="errors.jsonl",
+        "--error-report", "--errors-file", dest="errors_file", default="errors.jsonl",
         help="Write source, conversion, and writer errors as JSON Lines (default: %(default)s)",
+    )
+
+    base_parser.add_argument(
+        "--jobs", type=positive_int, default=None,
+        help="Number of conversion worker processes (default: multiprocessing default)",
+    )
+    base_parser.add_argument(
+        "--chunksize", type=positive_int, default=100,
+        help="Articles submitted to each worker at once (default: %(default)s)",
+    )
+    base_parser.add_argument(
+        "--verbose", action="store_true",
+        help="Print a status line for every processed article",
     )
 
     base_parser.add_argument(
@@ -398,9 +419,16 @@ def main():
     parser = arg_parser()
     args = parser.parse_args()
     if hasattr(args, "func"):
-        args.func(args)
+        try:
+            args.func(args)
+        except KeyboardInterrupt:
+            raise
+        except (SourceError, WriterError) as error:
+            logging.getLogger(__name__).error("Build failed: %s", error)
+            return 1
     else:
         parser.print_help()
+    return 0
 
 
 if __name__ == "main":
