@@ -7,9 +7,12 @@ from types import SimpleNamespace
 from unittest.mock import patch
 from unittest.mock import Mock
 
+import slob
 from mw2slob import cli
 from mw2slob import core
+from mw2slob import dump
 from mw2slob import scrape
+from mw2slob import siteinfo
 from mw2slob.reliability import (
     ConversionError,
     ConversionFailure,
@@ -175,6 +178,13 @@ class ReliabilityTest(unittest.TestCase):
         with patch.object(cli, "arg_parser", return_value=parser):
             self.assertEqual(1, cli.main())
 
+    def test_cli_returns_nonzero_for_failed_finalization(self):
+        failed = Mock(side_effect=WriterError("finalization failed"))
+        parser = Mock()
+        parser.parse_args.return_value = SimpleNamespace(func=failed)
+        with patch.object(cli, "arg_parser", return_value=parser):
+            self.assertEqual(1, cli.main())
+
     def test_couch_iteration_recovers_without_duplicates_or_gaps(self):
         class Row:
             def __init__(self, key):
@@ -223,6 +233,106 @@ class ReliabilityTest(unittest.TestCase):
             list(scrape.iter_view_with_retries(
                 Couch(), "_all_docs", 50, {}, attempts=2, initial_delay=0,
                 sleep=lambda _: None, random_value=lambda: 0))
+
+    def test_failed_finalization_preserves_existing_output_and_removes_temp(self):
+        class TempDir:
+            def cleanup(self):
+                pass
+
+        class Writer:
+            tmpdir = TempDir()
+
+            def __init__(self, filename):
+                self.filename = filename
+
+            def tag(self, *_args):
+                pass
+
+            def finalize(self):
+                Path(self.filename).write_bytes(b"partial")
+                raise OSError("finalization failed")
+
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as directory:
+            output = Path(directory) / "output.slob"
+            output.write_bytes(b"previous")
+            info = Info("test", "en", False, "", "", "/wiki/", "https://example.test")
+            with patch.object(core.slob, "create", side_effect=lambda path, **_kwargs: Writer(path)), \
+                 patch.object(core.slob, "add_dir"), patch.object(core, "run"), \
+                 patch.object(core, "p"):
+                with self.assertRaises(WriterError):
+                    core.create_slob(str(output), info, [], no_math=True)
+            self.assertEqual(b"previous", output.read_bytes())
+            self.assertFalse(Path(str(output) + ".tmp").exists())
+
+    def test_successful_finalization_atomically_replaces_existing_output(self):
+        class TempDir:
+            def cleanup(self):
+                pass
+
+        class Writer:
+            tmpdir = TempDir()
+
+            def __init__(self, filename):
+                self.filename = filename
+
+            def tag(self, *_args):
+                pass
+
+            def finalize(self):
+                Path(self.filename).write_bytes(b"replacement")
+
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as directory:
+            output = Path(directory) / "output.slob"
+            output.write_bytes(b"previous")
+            info = Info("test", "en", False, "", "", "/wiki/", "https://example.test")
+            with patch.object(core.slob, "create", side_effect=lambda path, **_kwargs: Writer(path)), \
+                 patch.object(core.slob, "add_dir"), patch.object(core, "run"), \
+                 patch.object(core, "p"):
+                core.create_slob(str(output), info, [], no_math=True)
+            self.assertEqual(b"replacement", output.read_bytes())
+            self.assertFalse(Path(str(output) + ".tmp").exists())
+
+    def test_dump_to_slob_end_to_end_smoke(self):
+        records = [
+            {
+                "name": "Article",
+                "article_body": {"html": "<p>Normal <strong>article</strong>.</p>"},
+                "redirects": [{"name": "Article alias"}],
+            },
+            {
+                "name": "Ёж",
+                "article_body": {"html": "<p>Unicode title and content.</p>"},
+            },
+            {
+                "name": "Wiki markup",
+                "article_body": {
+                    "html": "<style>.note { color: red; }</style><p class=\"note\">"
+                            "<a href=\"/wiki/Target\">Target</a></p>"
+                },
+            },
+        ]
+        info = Info("test", "en", False, "", "", "/wiki/", "https://example.test")
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as directory:
+            root = Path(directory)
+            source = root / "fixture.jsonl"
+            source.write_text("\n".join(json.dumps(record) for record in records) + "\n", encoding="utf-8")
+            output = root / "output.slob"
+            core.create_slob(
+                str(output), info, dump.articles([str(source)], info), workdir=str(root),
+                no_math=True, jobs=1, chunksize=1,
+            )
+            self.assertTrue(output.exists())
+            self.assertFalse(Path(str(output) + ".tmp").exists())
+            verification = slob.verify(str(output), full=True)
+            self.assertTrue(verification["valid"])
+            with slob.open(str(output)) as dictionary:
+                entries = list(dictionary)
+                keys = {entry.key for entry in entries}
+                self.assertTrue({"Article", "Article alias", "Ёж", "Wiki markup"}.issubset(keys))
+                article = next(entry for entry in entries if entry.key == "Article")
+                self.assertEqual("text/html;charset=utf-8", article.content_type)
+                self.assertIn(b"Normal", article.content)
+                self.assertGreaterEqual(len(dictionary), 4)
 
 
 if __name__ == "__main__":

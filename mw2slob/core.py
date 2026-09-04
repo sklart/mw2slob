@@ -216,14 +216,18 @@ def create_slob(
     verbose=False,
 ):
     stats = stats or Stats()
-    slb = slob.create(
-        outname,
-        compression=compression,
-        workdir=workdir,
-        min_bin_size=min_bin_size * 1024,
-        observer=observer,
-    )
+    temporary_outname = outname + ".tmp"
+    if os.path.exists(temporary_outname):
+        os.remove(temporary_outname)
+    slb = None
     try:
+        slb = slob.create(
+            temporary_outname,
+            compression=compression,
+            workdir=workdir,
+            min_bin_size=min_bin_size * 1024,
+            observer=observer,
+        )
         begin("content")
         # create tags
         slb.tag("license.name", "")
@@ -254,6 +258,10 @@ def create_slob(
                 for content_dir in content_dirs:
                     slob.add_dir(slb, content_dir)
             slb.finalize()
+            # Writer.finalize() closes and flushes its output before returning.
+            # Both paths are in the same directory, so replace is atomic where the
+            # platform supports atomic replacement.
+            os.replace(temporary_outname, outname)
         except Exception as error:
             if not isinstance(error, (SourceError, WriterError)):
                 stats.writer_errors += 1
@@ -263,9 +271,12 @@ def create_slob(
                 raise failure from error
             raise
     finally:
-        if not getattr(slb, "_finalized", False):
+        if slb is not None and not getattr(slb, "_finalized", False):
             slb.tmpdir.cleanup()
-        elapsed = time.time() - times.get("all", time.time())
-        p("\n{}\n".format(stats.summary(elapsed)))
-        p("All done in %s\n" % end("all"))
+        if os.path.exists(temporary_outname):
+            os.remove(temporary_outname)
+        if "all" in times:
+            elapsed = time.time() - times["all"]
+            p("\n{}\n".format(stats.summary(elapsed)))
+            p("All done in %s\n" % end("all"))
     return stats
