@@ -30,3 +30,6 @@ jobs:
       - name: Run reliability tests
         working-directory: mw2slob
         run: python -m unittest discover -s tests -v
+      - name: Run benchmark smoke
+        working-directory: mw2slob
+        run: python benchmarks/benchmark.py --smoke --output-dir benchmark-smoke

@@ -106,20 +106,22 @@ def process_initializer(css_selectors, interwikimap, namespaces):
 
 def safe_convert(
     params: convert.ConvertParams,
-) -> Tuple[str, Iterable[str], Optional[bytes], Optional[str]]:
+) -> Tuple[str, Iterable[str], Optional[bytes], Optional[object], float]:
     text = params.text
     title = params.title
     aliases = params.aliases
+    started = time.perf_counter()
     try:
         if text is None:
-            return title, aliases, b"", None
+            return title, aliases, b"", None, time.perf_counter() - started
         html = convert.convert(params, SELECTORS, NAMESPACES, INTERWIKI)
-        return title, aliases, html, None
+        return title, aliases, html, None, time.perf_counter() - started
     except KeyboardInterrupt:
         raise
     except Exception as ex:
         log.exception("Failed to convert %r", title)
-        return title, aliases, None, ConversionFailure(type(ex).__name__, str(ex))
+        return title, aliases, None, ConversionFailure(type(ex).__name__, str(ex)), \
+            time.perf_counter() - started
 
 
 def run(
@@ -135,6 +137,7 @@ def run(
     chunksize=100,
     verbose=False,
     source=None,
+    timings=None,
 ):
     stats = stats or Stats()
     pool = multiprocessing.Pool(
@@ -145,7 +148,12 @@ def run(
     html_content_type = HTML_CHARSET_TMPL.format(html_encoding)
     try:
         resulti = pool.imap_unordered(safe_convert, articles, chunksize=chunksize)
-        for title, aliases, text, error in resulti:
+        for result in resulti:
+            title, aliases, text, error = result[:4]
+            conversion_elapsed = result[4] if len(result) > 4 else 0.0
+            if timings is not None:
+                timings["html_conversion_worker"] = timings.get(
+                    "html_conversion_worker", 0.0) + conversion_elapsed
             stats.processed += 1
             if error:
                 if isinstance(error, ConversionFailure):
@@ -165,7 +173,11 @@ def run(
                     if aliases:
                         keys += aliases
                     try:
+                        writer_started = time.perf_counter()
                         slb.add(text, *keys, content_type=html_content_type)
+                        if timings is not None:
+                            timings["writer_add"] = timings.get(
+                                "writer_add", 0.0) + (time.perf_counter() - writer_started)
                     except Exception as error:
                         stats.writer_errors += 1
                         failure = WriterError("failed to write {!r}: {}".format(title, error))
@@ -214,6 +226,7 @@ def create_slob(
     jobs=None,
     chunksize=100,
     verbose=False,
+    timings=None,
 ):
     stats = stats or Stats()
     temporary_outname = outname + ".tmp"
@@ -244,7 +257,7 @@ def create_slob(
 
         run(slb, articles, filters, info.interwikimap, info.namespaces, html_encoding,
             reporter=reporter, stats=stats, jobs=jobs, chunksize=chunksize,
-            verbose=verbose, source=info.server)
+            verbose=verbose, source=info.server, timings=timings)
 
         include_built_in = {"js", "css", "images"}
 

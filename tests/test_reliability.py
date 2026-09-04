@@ -118,7 +118,7 @@ class ReliabilityTest(unittest.TestCase):
     def test_safe_convert_preserves_original_exception_type(self):
         params = SimpleNamespace(title="Broken", aliases=(), text="<bad>")
         with patch.object(core.convert, "convert", side_effect=ValueError("bad HTML")):
-            _title, _aliases, text, failure = core.safe_convert(params)
+            _title, _aliases, text, failure, _elapsed = core.safe_convert(params)
         self.assertIsNone(text)
         self.assertEqual("ValueError", failure.exception_type)
         self.assertEqual("bad HTML", failure.message)
