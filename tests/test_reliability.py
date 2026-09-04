@@ -1,6 +1,7 @@
 import json
 import tempfile
 import unittest
+from http.client import IncompleteRead
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -8,8 +9,10 @@ from unittest.mock import Mock
 
 from mw2slob import cli
 from mw2slob import core
+from mw2slob import scrape
 from mw2slob.reliability import (
     ConversionError,
+    ConversionFailure,
     ErrorReporter,
     SourceError,
     Stats,
@@ -80,7 +83,10 @@ class ReliabilityTest(unittest.TestCase):
     def test_conversion_error_is_reported_and_does_not_abort(self):
         class Pool:
             def imap_unordered(self, *_args, **_kwargs):
-                return iter([("Broken", (), None, "bad HTML"), ("Good", (), b"ok", None)])
+                return iter([
+                    ("Broken", (), None, ConversionFailure("ValueError", "bad HTML")),
+                    ("Good", (), b"ok", None),
+                ])
 
             def terminate(self):
                 pass
@@ -101,7 +107,18 @@ class ReliabilityTest(unittest.TestCase):
                 stats = core.run(Writer(), [object()], [], [], {}, "utf-8", reporter=reporter)
             self.assertEqual(1, stats.conversion_errors)
             self.assertEqual(1, stats.written)
-            self.assertEqual("convert", json.loads(report.read_text(encoding="utf-8"))["stage"])
+            error = json.loads(report.read_text(encoding="utf-8"))
+            self.assertEqual("convert", error["stage"])
+            self.assertEqual("ValueError", error["error_type"])
+            self.assertEqual("bad HTML", error["message"])
+
+    def test_safe_convert_preserves_original_exception_type(self):
+        params = SimpleNamespace(title="Broken", aliases=(), text="<bad>")
+        with patch.object(core.convert, "convert", side_effect=ValueError("bad HTML")):
+            _title, _aliases, text, failure = core.safe_convert(params)
+        self.assertIsNone(text)
+        self.assertEqual("ValueError", failure.exception_type)
+        self.assertEqual("bad HTML", failure.message)
 
     def test_writer_error_aborts_immediately(self):
         class Pool:
@@ -157,6 +174,48 @@ class ReliabilityTest(unittest.TestCase):
         parser.parse_args.return_value = SimpleNamespace(func=failed)
         with patch.object(cli, "arg_parser", return_value=parser):
             self.assertEqual(1, cli.main())
+
+    def test_couch_iteration_recovers_without_duplicates_or_gaps(self):
+        class Row:
+            def __init__(self, key):
+                self.id = key
+
+        class Couch:
+            calls = []
+
+            def iterview(self, _name, _batch_size, **args):
+                self.calls.append(args)
+                if len(self.calls) == 1:
+                    def interrupted():
+                        yield Row("A")
+                        yield Row("B")
+                        raise IncompleteRead(b"", 1)
+                    return interrupted()
+
+                def resumed():
+                    yield Row("B")
+                    yield Row("C")
+                return resumed()
+
+        couch = Couch()
+        rows = list(scrape.iter_view_with_retries(
+            couch, "_all_docs", 50, {}, initial_delay=0, sleep=lambda _: None,
+            random_value=lambda: 0))
+        self.assertEqual(["A", "B", "C"], [row.id for row in rows])
+        self.assertEqual("B", couch.calls[1]["startkey"])
+
+    def test_couch_iteration_aborts_after_retry_exhaustion(self):
+        class Couch:
+            def iterview(self, *_args, **_kwargs):
+                def interrupted():
+                    raise IncompleteRead(b"", 1)
+                    yield None
+                return interrupted()
+
+        with self.assertRaises(SourceError):
+            list(scrape.iter_view_with_retries(
+                Couch(), "_all_docs", 50, {}, attempts=2, initial_delay=0,
+                sleep=lambda _: None, random_value=lambda: 0))
 
 
 if __name__ == "__main__":

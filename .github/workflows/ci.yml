@@ -1,0 +1,30 @@
+name: mw2slob CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  reliability:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: mw2slob
+      - uses: actions/checkout@v4
+        with:
+          repository: sklart/slob
+          path: slob
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libicu-dev
+          python -m pip install --upgrade pip
+          python -m pip install -e ./slob --no-deps
+          python -m pip install -e ./mw2slob --no-deps CouchDB cssselect cssutils beautifulsoup4 lxml lxml_html_clean PyICU
+      - name: Run reliability tests
+        working-directory: mw2slob
+        run: python -m unittest discover -s tests -v

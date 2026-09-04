@@ -22,6 +22,14 @@ class WriterError(RuntimeError):
     """A SLOB writer operation failed; finalization must not run."""
 
 
+@dataclass(frozen=True)
+class ConversionFailure:
+    """Pickle-safe description of an exception raised by a worker process."""
+
+    exception_type: str
+    message: str
+
+
 def is_retryable_source_error(error):
     """Return whether a source exception can be retried safely."""
     if isinstance(error, (IncompleteRead, socket.timeout, ConnectionResetError, TimeoutError)):
@@ -86,8 +94,8 @@ class ErrorReporter:
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "stage": stage,
             "category": stage,
-            "error_type": type(error).__name__,
-            "message": str(error),
+            "error_type": getattr(error, "original_type", type(error).__name__),
+            "message": getattr(error, "original_message", str(error)),
             "source": source,
         }
         if title is not None:

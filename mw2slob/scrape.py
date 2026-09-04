@@ -1,6 +1,9 @@
 import itertools
 import logging
 import os
+import random
+import time
+import itertools
 from typing import Optional
 from typing import Sequence
 from typing import Tuple
@@ -10,7 +13,7 @@ import couchdb
 
 from . import convert
 from . import siteinfo as si
-from .reliability import retry
+from .reliability import SourceError, is_retryable_source_error, retry
 
 log = logging.getLogger(__name__)
 
@@ -31,6 +34,38 @@ def mkcouch(couch_url, attempts=3, initial_delay=1.0) -> Tuple[couchdb.Database,
         return server[couch_db], server["siteinfo"]
 
     return retry(connect, attempts=attempts, initial_delay=initial_delay)
+
+
+def iter_view_with_retries(couch, view_name, batch_size, view_args,
+                           attempts=3, initial_delay=1.0, sleep=time.sleep,
+                           random_value=random.random):
+    """Yield a CouchDB view exactly once per document across reconnects."""
+    last_key = None
+    seen_keys = set()
+    failures = 0
+    while True:
+        request_args = dict(view_args)
+        if last_key is not None and "keys" not in request_args:
+            request_args["startkey"] = last_key
+        try:
+            for row in couch.iterview(view_name, batch_size, **request_args):
+                row_key = row.id
+                if row_key in seen_keys:
+                    continue
+                seen_keys.add(row_key)
+                last_key = row_key
+                failures = 0
+                yield row
+            return
+        except KeyboardInterrupt:
+            raise
+        except Exception as error:
+            failures += 1
+            if not is_retryable_source_error(error) or failures >= attempts:
+                raise SourceError("CouchDB view failed after {} attempts: {}".format(
+                    failures, error)) from error
+            delay = initial_delay * (2 ** (failures - 1))
+            sleep(delay + (delay * 0.25 * random_value()))
 
 
 def articles(
@@ -111,11 +146,11 @@ def articles(
                 query_args = dict(basic_view_args)
                 query_args["keys"] = [key for key in key_group if key]
                 keys_found = set()
-                viewiter = couch.iterview(
-                    "_all_docs", len(query_args["keys"]), **query_args
+                viewiter = iter_view_with_retries(
+                    couch, "_all_docs", len(query_args["keys"]), query_args
                 )
                 for item in articles_from_viewiter(viewiter):
-                    keys_found.add(item[0])
+                    keys_found.add(item.title)
                     yield item
                 for key in set(query_args["keys"]) - keys_found:
                     yield mk_params(
@@ -126,7 +161,7 @@ def articles(
                 keys_found.clear()
 
     else:
-        viewiter = couch.iterview("_all_docs", 50, **view_args)
+        viewiter = iter_view_with_retries(couch, "_all_docs", 50, view_args)
         for item in articles_from_viewiter(viewiter):
             yield item
 

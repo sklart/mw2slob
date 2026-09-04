@@ -14,7 +14,7 @@ import slob
 
 from . import convert
 from . import siteinfo as si
-from .reliability import ConversionError, SourceError, Stats, WriterError
+from .reliability import ConversionError, ConversionFailure, SourceError, Stats, WriterError
 
 times = {}
 
@@ -119,7 +119,7 @@ def safe_convert(
         raise
     except Exception as ex:
         log.exception("Failed to convert %r", title)
-        return title, aliases, None, str(ex)
+        return title, aliases, None, ConversionFailure(type(ex).__name__, str(ex))
 
 
 def run(
@@ -148,7 +148,12 @@ def run(
         for title, aliases, text, error in resulti:
             stats.processed += 1
             if error:
-                failure = ConversionError(error)
+                if isinstance(error, ConversionFailure):
+                    failure = ConversionError(error.message)
+                    failure.original_type = error.exception_type
+                    failure.original_message = error.message
+                else:
+                    failure = ConversionError(str(error))
                 stats.conversion_errors += 1
                 if reporter:
                     reporter.record("convert", failure, title, source=source)
