@@ -628,7 +628,8 @@ def convert(
             tex = item.attrib.get("data-tex") or item.attrib.get("alt")
             if not tex:
                 continue
-            display = "block" if "display" in item.attrib.get("class", "") else "inline"
+            classes = item.attrib.get("class", "").split()
+            display = "block" if "mwe-math-element-block" in classes else "inline"
             mathml = native_mathml(tex, display)
             if mathml is not None and item.getparent() is not None:
                 item.getparent().replace(item, mathml)

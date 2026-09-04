@@ -114,6 +114,38 @@ class ReliabilityTest(unittest.TestCase):
                 keys = {entry.key.replace("\\", "/") for entry in dictionary}
                 self.assertIn("~/MathJax/MediaWiki.js", keys)
 
+    def test_real_parsoid_inline_and_block_math_use_convert_pipeline(self):
+        corpus_path = Path(__file__).parent / "fixtures" / "mediawiki-parsoid-math.jsonl"
+        records = [json.loads(line) for line in corpus_path.read_text(encoding="utf-8").splitlines()]
+        for class_name, display in (("mwe-math-element-inline", "inline"),
+                                    ("mwe-math-element-block", "block")):
+            record = next(item for item in records if class_name in item["html"])
+            converted = self.convert_html("<html><body>{}</body></html>".format(record["html"]),
+                                          "native-mathml")
+            self.assertRegex(converted, r'<math[^>]*display="{}"'.format(display))
+
+    def test_real_native_fallback_end_to_end_includes_mathjax_assets(self):
+        tex = r"\ce{H2O}"
+        element = (
+            '<span class="mwe-math-element mwe-math-element-inline" data-mw="%s">'
+            '<img class="mwe-math-fallback-image-inline" src="/math.png" alt="H₂O"></span>' %
+            html.escape(json.dumps({"body": {"extsrc": tex}}), quote=True))
+        record = {"name": "Fallback", "article_body": {"html": "<html><body>%s</body></html>" % element}}
+        info = Info("test", "en", False, "", "", "/wiki/", "https://example.test")
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as directory:
+            root = Path(directory)
+            source, output = root / "source.jsonl", root / "output.slob"
+            source.write_text(json.dumps(record) + "\n", encoding="utf-8")
+            core.create_slob(str(output), info, dump.articles([str(source)], info), workdir=str(root),
+                             jobs=1, chunksize=1, math_renderer="native-mathml")
+            with slob.open(str(output)) as dictionary:
+                article = next(entry for entry in dictionary if entry.key == "Fallback")
+                content = article.content.decode("utf-8")
+                keys = {entry.key.replace("\\", "/") for entry in dictionary}
+            self.assertIn('data-tex="\\ce{H2O}"', content)
+            self.assertIn(convert.MATH_JAX_SCRIPTS, content)
+            self.assertIn("~/MathJax/MediaWiki.js", keys)
+
     def test_retry_uses_exponential_backoff(self):
         calls = []
         delays = []

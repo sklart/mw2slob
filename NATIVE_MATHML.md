@@ -39,6 +39,32 @@ such SLOBs); a dictionary containing only the nine supported formulae does
 not. This is structural coverage, not a pixel-level browser rendering
 assessment.
 
+## Real MediaWiki compatibility corpus
+
+`tests/fixtures/mediawiki-parsoid-math.jsonl` contains 718 original
+`span.mwe-math-element` fragments collected from public Wikimedia Parsoid HTML
+endpoints. Each record retains its source URL, article title, original HTML and
+`data-mw.body.extsrc`; `tools/collect_wikimedia_math_corpus.py` reproduces the
+collection without running in CI. The corpus includes actual
+`mwe-math-element-inline` and `mwe-math-element-block` fixtures.
+
+`tools/analyze_native_math_corpus.py` runs every stored fragment through
+`convert()` with `native-mathml` — it does not call `native_mathml()` directly.
+The current committed result is:
+
+| result | formulas | share |
+| --- | ---: | ---: |
+| native success | 707 | 98.47% |
+| MathJax fallback | 11 | 1.53% |
+| conversion error | 0 | 0.00% |
+
+The sample spans seven source articles: four require a fallback and three are
+fully native. The complete corpus as one dictionary therefore requires MathJax
+assets (1/1 dictionaries), while its three all-native source-article subsets
+can be built without them. Real inline/block fixtures are checked through the
+full `convert()` path, and a `jobs=1` end-to-end SLOB test builds an actual
+`\ce{H2O}` fallback article and verifies its MathJax assets.
+
 ## Local comparison
 
 Windows, Python 3.11, 1,000 offline fixture articles, `jobs=2`, `chunksize=25`.
