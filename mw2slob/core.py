@@ -73,9 +73,12 @@ HTML_CHARSET_TMPL = "text/html;charset={0}"
 SELECTORS = []
 INTERWIKI: Mapping[str, str] = {}
 NAMESPACES: Mapping[str, str] = {}
+BENCHMARK_TIMING = False
 
 
-def process_initializer(css_selectors, interwikimap, namespaces):
+def process_initializer(css_selectors, interwikimap, namespaces, benchmark_timing=False):
+    global BENCHMARK_TIMING
+    BENCHMARK_TIMING = benchmark_timing
     logging.basicConfig()
     for css_selector in css_selectors:
         if ":contains(" in css_selector:
@@ -106,22 +109,24 @@ def process_initializer(css_selectors, interwikimap, namespaces):
 
 def safe_convert(
     params: convert.ConvertParams,
-) -> Tuple[str, Iterable[str], Optional[bytes], Optional[object], float]:
+) -> Tuple[str, Iterable[str], Optional[bytes], Optional[object]]:
     text = params.text
     title = params.title
     aliases = params.aliases
-    started = time.perf_counter()
+    started = time.perf_counter() if BENCHMARK_TIMING else None
     try:
         if text is None:
-            return title, aliases, b"", None, time.perf_counter() - started
+            result = (title, aliases, b"", None)
+            return result + (time.perf_counter() - started,) if BENCHMARK_TIMING else result
         html = convert.convert(params, SELECTORS, NAMESPACES, INTERWIKI)
-        return title, aliases, html, None, time.perf_counter() - started
+        result = (title, aliases, html, None)
+        return result + (time.perf_counter() - started,) if BENCHMARK_TIMING else result
     except KeyboardInterrupt:
         raise
     except Exception as ex:
         log.exception("Failed to convert %r", title)
-        return title, aliases, None, ConversionFailure(type(ex).__name__, str(ex)), \
-            time.perf_counter() - started
+        result = (title, aliases, None, ConversionFailure(type(ex).__name__, str(ex)))
+        return result + (time.perf_counter() - started,) if BENCHMARK_TIMING else result
 
 
 def run(
@@ -138,20 +143,25 @@ def run(
     verbose=False,
     source=None,
     timings=None,
+    benchmark_timing=False,
+    process_sampler=None,
 ):
     stats = stats or Stats()
+    pool_started = time.perf_counter() if benchmark_timing else None
     pool = multiprocessing.Pool(
         jobs,
         process_initializer,
-        [filters, interwikimap, namespaces],
+        [filters, interwikimap, namespaces, benchmark_timing],
     )
+    if benchmark_timing and timings is not None:
+        timings["pool_startup"] = time.perf_counter() - pool_started
     html_content_type = HTML_CHARSET_TMPL.format(html_encoding)
     try:
         resulti = pool.imap_unordered(safe_convert, articles, chunksize=chunksize)
         for result in resulti:
             title, aliases, text, error = result[:4]
-            conversion_elapsed = result[4] if len(result) > 4 else 0.0
-            if timings is not None:
+            conversion_elapsed = result[4] if benchmark_timing else 0.0
+            if benchmark_timing and timings is not None:
                 timings["html_conversion_worker"] = timings.get(
                     "html_conversion_worker", 0.0) + conversion_elapsed
             stats.processed += 1
@@ -175,7 +185,7 @@ def run(
                     try:
                         writer_started = time.perf_counter()
                         slb.add(text, *keys, content_type=html_content_type)
-                        if timings is not None:
+                        if benchmark_timing and timings is not None:
                             timings["writer_add"] = timings.get(
                                 "writer_add", 0.0) + (time.perf_counter() - writer_started)
                     except Exception as error:
@@ -203,8 +213,13 @@ def run(
             raise failure from error
         raise
     finally:
+        if process_sampler is not None:
+            process_sampler.capture()
+        shutdown_started = time.perf_counter() if benchmark_timing else None
         pool.terminate()
         pool.join()
+        if benchmark_timing and timings is not None:
+            timings["pool_shutdown"] = time.perf_counter() - shutdown_started
     return stats
 
 
@@ -227,6 +242,8 @@ def create_slob(
     chunksize=100,
     verbose=False,
     timings=None,
+    benchmark_timing=False,
+    process_sampler=None,
 ):
     stats = stats or Stats()
     temporary_outname = outname + ".tmp"
@@ -257,7 +274,8 @@ def create_slob(
 
         run(slb, articles, filters, info.interwikimap, info.namespaces, html_encoding,
             reporter=reporter, stats=stats, jobs=jobs, chunksize=chunksize,
-            verbose=verbose, source=info.server, timings=timings)
+            verbose=verbose, source=info.server, timings=timings,
+            benchmark_timing=benchmark_timing, process_sampler=process_sampler)
 
         include_built_in = {"js", "css", "images"}
 
@@ -266,10 +284,13 @@ def create_slob(
 
         content_dir = os.path.dirname(__file__)
         try:
+            static_started = time.perf_counter() if benchmark_timing else None
             slob.add_dir(slb, content_dir, include_only=include_built_in, prefix="~/")
             if content_dirs:
                 for content_dir in content_dirs:
                     slob.add_dir(slb, content_dir)
+            if benchmark_timing and timings is not None:
+                timings["static_assets"] = time.perf_counter() - static_started
             slb.finalize()
             # Writer.finalize() closes and flushes its output before returning.
             # Both paths are in the same directory, so replace is atomic where the

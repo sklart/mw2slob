@@ -8,20 +8,83 @@ different machines can be compared without scraping console output.
 import argparse
 import json
 import os
-import platform
+import threading
 import time
-import tracemalloc
 from pathlib import Path
 
+import psutil
 from mw2slob import core, dump
 from mw2slob.siteinfo import Info
 
 
+class ProcessTreeSampler:
+    """Sample CPU and RSS for the parent plus all multiprocessing workers."""
+
+    def __init__(self, interval=0.01):
+        self.parent_pid = os.getpid()
+        self.parent_start_cpu = self._cpu(psutil.Process(self.parent_pid))
+        self.interval = interval
+        self.parent_peak_rss = self.workers_peak_rss = self.tree_peak_rss = 0
+        self.cpu_by_pid = {}
+        self._stop = threading.Event()
+
+    @staticmethod
+    def _cpu(process):
+        cpu = process.cpu_times()
+        return cpu.user + cpu.system
+
+    def capture(self):
+        try:
+            parent = psutil.Process(self.parent_pid)
+            processes = [parent] + parent.children(recursive=True)
+        except (psutil.Error, OSError):
+            return
+        parent_rss = workers_rss = 0
+        for process in processes:
+            try:
+                rss, cpu = process.memory_info().rss, self._cpu(process)
+            except (psutil.Error, OSError):
+                continue
+            self.cpu_by_pid[process.pid] = max(self.cpu_by_pid.get(process.pid, 0.0), cpu)
+            if process.pid == self.parent_pid:
+                parent_rss = rss
+            else:
+                workers_rss += rss
+        self.parent_peak_rss = max(self.parent_peak_rss, parent_rss)
+        self.workers_peak_rss = max(self.workers_peak_rss, workers_rss)
+        self.tree_peak_rss = max(self.tree_peak_rss, parent_rss + workers_rss)
+
+    def start(self):
+        self.capture()
+        self.thread = threading.Thread(target=self._run, daemon=True)
+        self.thread.start()
+
+    def _run(self):
+        while not self._stop.wait(self.interval):
+            self.capture()
+
+    def stop(self):
+        self.capture()
+        self._stop.set()
+        self.thread.join()
+        self.capture()
+        parent_cpu = max(self.cpu_by_pid.get(self.parent_pid, self.parent_start_cpu) - self.parent_start_cpu, 0.0)
+        workers_cpu = sum(cpu for pid, cpu in self.cpu_by_pid.items() if pid != self.parent_pid)
+        return {
+            "total_cpu_seconds": parent_cpu + workers_cpu,
+            "parent_cpu_seconds": parent_cpu,
+            "workers_cpu_seconds": workers_cpu,
+            "peak_rss_process_tree_bytes": self.tree_peak_rss,
+            "peak_rss_parent_bytes": self.parent_peak_rss,
+            "peak_rss_workers_bytes": self.workers_peak_rss,
+        }
+
+
 class StageObserver:
     EVENTS = {
-        "sort": ("begin_sort", "end_sort"),
-        "alias_resolve": ("begin_resolve_aliases", "end_resolve_aliases"),
-        "finalization": ("begin_finalize", "end_finalize"),
+        "sorting_total": ("begin_sort", "end_sort"),
+        "alias_resolve_total": ("begin_resolve_aliases", "end_resolve_aliases"),
+        "finalization_total": ("begin_finalize", "end_finalize"),
     }
 
     def __init__(self):
@@ -75,15 +138,6 @@ def write_fixture(path, count, heavy=False):
             output.write(json.dumps(fixture_record(index, heavy), ensure_ascii=False) + "\n")
 
 
-def peak_rss_bytes():
-    try:
-        import resource
-        value = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
-        return value if platform.system() == "Darwin" else value * 1024
-    except ImportError:
-        return None
-
-
 def run_benchmark(output_dir, articles, jobs, chunksize, heavy=False, no_math=False):
     output_dir.mkdir(parents=True, exist_ok=True)
     fixture = output_dir / "fixture-{}.jsonl".format(articles)
@@ -93,15 +147,17 @@ def run_benchmark(output_dir, articles, jobs, chunksize, heavy=False, no_math=Fa
     observer = StageObserver()
     timings = {}
     timed_articles = TimedArticles(fixture, info)
+    sampler = ProcessTreeSampler()
     started = time.perf_counter()
-    cpu_started = time.process_time()
-    tracemalloc.start()
-    core.create_slob(
-        str(output), info, timed_articles, workdir=str(output_dir), no_math=no_math,
-        jobs=jobs, chunksize=chunksize, observer=observer, timings=timings,
-    )
-    current, traced_peak = tracemalloc.get_traced_memory()
-    tracemalloc.stop()
+    sampler.start()
+    try:
+        core.create_slob(
+            str(output), info, timed_articles, workdir=str(output_dir), no_math=no_math,
+            jobs=jobs, chunksize=chunksize, observer=observer, timings=timings,
+            benchmark_timing=True, process_sampler=sampler,
+        )
+    finally:
+        process_metrics = sampler.stop()
     total = time.perf_counter() - started
     result = {
         "articles": articles,
@@ -111,22 +167,28 @@ def run_benchmark(output_dir, articles, jobs, chunksize, heavy=False, no_math=Fa
         "mathjax": not no_math,
         "total": total,
         "articles_per_second": articles / total if total else 0.0,
-        "cpu_seconds": time.process_time() - cpu_started,
-        "peak_rss_bytes": peak_rss_bytes(),
-        "peak_python_tracemalloc_bytes": traced_peak,
         "output_bytes": output.stat().st_size,
         "source_read": timed_articles.elapsed,
-        "html_conversion_worker": timings.get("html_conversion_worker", 0.0),
+        "pool_startup": timings.get("pool_startup", 0.0),
+        "html_conversion_aggregate_worker_seconds": timings.get("html_conversion_worker", 0.0),
         "writer_add": timings.get("writer_add", 0.0),
-        "sorting": observer.timings.get("sort", 0.0),
-        "alias_resolve": observer.timings.get("alias_resolve", 0.0),
-        "finalization": observer.timings.get("finalization", 0.0),
+        "static_assets": timings.get("static_assets", 0.0),
+        "sorting_total": observer.timings.get("sorting_total", 0.0),
+        "alias_resolve_total": observer.timings.get("alias_resolve_total", 0.0),
+        "finalization_total": observer.timings.get("finalization_total", 0.0),
+        "pool_shutdown": timings.get("pool_shutdown", 0.0),
     }
-    effective_jobs = jobs or (os.cpu_count() or 1)
-    result["multiprocessing_overhead_estimate"] = max(
-        0.0, total - result["source_read"] - result["writer_add"]
-        - (result["html_conversion_worker"] / effective_jobs)
-        - result["finalization"],
+    result["finalization_other"] = max(
+        0.0, result["finalization_total"] - result["sorting_total"]
+        - result["alias_resolve_total"],
+    )
+    result.update(process_metrics)
+    # Aggregate worker CPU and wall-clock stages overlap, so the residual is
+    # deliberately not claimed to be IPC overhead.
+    result["unattributed_overhead"] = max(
+        0.0, total - result["source_read"] - result["pool_startup"]
+        - result["writer_add"] - result["static_assets"]
+        - result["finalization_total"] - result["pool_shutdown"],
     )
     (output_dir / "benchmark.json").write_text(json.dumps(result, indent=2, sort_keys=True), encoding="utf-8")
     return result

@@ -7,6 +7,7 @@ alongside the generated SLOB; no network service is used.
 Run a baseline:
 
 ```text
+python -m pip install -e ".[benchmark]"
 python benchmarks/benchmark.py --articles 1000 --jobs 2 --chunksize 100 --output-dir benchmark-output
 python benchmarks/benchmark.py --articles 10000 --heavy --jobs 2 --chunksize 100 --output-dir benchmark-heavy
 python benchmarks/run_matrix.py --articles 1000 --output-dir benchmark-matrix
@@ -17,32 +18,63 @@ The matrix covers jobs `1`, `2`, `4`, and `auto` with chunksizes `10`, `25`,
 
 ## Measurements
 
-The harness reports wall-clock total, articles/sec, process CPU seconds, peak
-RSS when supported (Linux/macOS), Python traced peak memory, output size, and
-these stages: source read, aggregate worker HTML conversion, writer `add`,
-sorting, alias resolution, finalization, and a derived multiprocessing/IPC
-overhead estimate. Worker conversion time is aggregate work across processes;
-it must not be compared directly to wall-clock time for multi-worker runs.
+The harness uses `psutil` to sample the parent process and every live worker
+every 10 ms. It reports total CPU time and peak RSS for the complete process
+tree, plus parent/worker splits. A worker that has exited remains represented
+by its last sampled monotonic CPU value. These measurements are benchmark-only:
+normal conversion neither calls timing functions nor sends timing values over
+the multiprocessing queue.
 
-Local baseline, Windows / Python 3.11 / MathJax enabled / 1,000 articles:
+Stages are source read, pool startup, aggregate worker HTML conversion, writer
+`add`, static assets, finalization, and pool shutdown. `sorting_total` and
+`alias_resolve_total` are nested within `finalization_total`; therefore they
+must never be added to it. `finalization_other` is the non-overlapping
+remainder. `unattributed_overhead` is only an explicitly unassigned wall-clock
+residual, not a measurement of IPC overhead.
 
-| jobs | chunksize | total | articles/s | output |
-| ---: | ---: | ---: | ---: | ---: |
-| 1 | 100 | 5.35 s | 187 | 2.70 MB |
-| 2 | 100 | 3.29 s | 304 | 2.70 MB |
-| 4 | 100 | 3.23 s | 309 | 2.70 MB |
-| auto | 100 | 3.86 s | 259 | 2.70 MB |
-| 2, heavy | 100 | 19.21 s / 10,000 | 521 | 3.14 MB |
+Full local matrix, Windows / Python 3.11 / MathJax enabled / 1,000 articles.
+CPU and RSS cover the process tree; RSS is its peak. Results are rounded.
 
-For this machine, `--jobs 2 --chunksize 100` is the conservative default:
-it is close to the best observed throughput without the extra worker pressure
-of four processes. Re-run the full matrix on the target machine before making
-defaults platform-wide.
+| jobs | chunksize | total, s | articles/s | CPU, s | peak RSS, MiB |
+| ---: | ---: | ---: | ---: | ---: | ---: |
+| 1 | 10 | 3.47 | 288 | 3.48 | 111 |
+| 1 | 25 | 3.48 | 287 | 3.89 | 111 |
+| 1 | 50 | 3.50 | 286 | 4.92 | 112 |
+| 1 | 100 | 3.46 | 289 | 3.92 | 93 |
+| 1 | 250 | 3.42 | 292 | 5.34 | 93 |
+| 1 | 500 | 3.53 | 283 | 5.39 | 113 |
+| 2 | 10 | 3.24 | 309 | 4.42 | 158 |
+| 2 | 25 | 3.28 | 305 | 4.38 | 156 |
+| 2 | 50 | 3.42 | 292 | 4.70 | 158 |
+| 2 | 100 | 3.30 | 303 | 3.69 | 159 |
+| 2 | 250 | 3.49 | 286 | 4.20 | 140 |
+| 2 | 500 | 3.34 | 299 | 5.30 | 159 |
+| 4 | 10 | 3.83 | 262 | 5.33 | 245 |
+| 4 | 25 | 4.01 | 249 | 6.19 | 247 |
+| 4 | 50 | 4.04 | 248 | 7.05 | 247 |
+| 4 | 100 | 4.05 | 247 | 6.72 | 249 |
+| 4 | 250 | 3.88 | 258 | 6.91 | 248 |
+| 4 | 500 | 4.13 | 242 | 6.23 | 248 |
+| auto | 10 | 3.78 | 265 | 12.16 | 757 |
+| auto | 25 | 3.87 | 258 | 12.09 | 761 |
+| auto | 50 | 4.01 | 249 | 12.44 | 741 |
+| auto | 100 | 3.55 | 282 | 11.94 | 781 |
+| auto | 250 | 3.95 | 253 | 12.45 | 785 |
+| auto | 500 | 4.25 | 236 | 12.12 | 781 |
 
-The initial measurements show finalization (including bundled MathJax assets),
-multiprocessing/IPC, and HTML conversion as the three largest areas to inspect.
-No parser, compression, mmap, or codec change is proposed without a before/
-after row containing baseline, speedup, RAM delta, and output-size delta.
+For this machine, `--jobs 2 --chunksize 25` is the recommended conservative
+setting: it is within 1% of the fastest row (`2/10`), while avoiding a very
+small task batch. Do not make it a project-wide default until this matrix has
+been reproduced on a representative build host.
+
+The confirmed bottlenecks are (1) HTML conversion, whose aggregate worker CPU
+was 0.40–0.81 s per 1,000 articles; (2) process creation/memory pressure,
+shown by `auto` reaching 741–785 MiB without throughput benefit; and (3)
+finalization, where the measured total is about 0.17–0.26 s and includes
+sorting, alias resolution, static assets and output assembly. These figures do
+not prove an IPC bottleneck. No parser, compression, mmap, or codec change is
+proposed without a before/after row containing baseline, speedup, RAM delta,
+and output-size delta.
 
 ## Profiling
 

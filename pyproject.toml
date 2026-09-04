@@ -21,6 +21,9 @@ dependencies = [
     "lxml_html_clean",
 ]
 
+[project.optional-dependencies]
+benchmark = ["psutil"]
+
 [project.urls]
 Homepage = "http://github.com/itkach/mw2slob"
 
