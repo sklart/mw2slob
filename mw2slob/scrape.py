@@ -3,7 +3,6 @@ import logging
 import os
 import random
 import time
-import itertools
 from typing import Optional
 from typing import Sequence
 from typing import Tuple
@@ -41,18 +40,23 @@ def iter_view_with_retries(couch, view_name, batch_size, view_args,
                            random_value=random.random):
     """Yield a CouchDB view exactly once per document across reconnects."""
     last_key = None
-    seen_keys = set()
+    seen_keys = set() if "keys" in view_args else None
     failures = 0
     while True:
         request_args = dict(view_args)
         if last_key is not None and "keys" not in request_args:
             request_args["startkey"] = last_key
         try:
+            skip_resumed_key = last_key is not None and seen_keys is None
             for row in couch.iterview(view_name, batch_size, **request_args):
                 row_key = row.id
-                if row_key in seen_keys:
+                if seen_keys is not None and row_key in seen_keys:
                     continue
-                seen_keys.add(row_key)
+                if skip_resumed_key and row_key == last_key:
+                    skip_resumed_key = False
+                    continue
+                if seen_keys is not None:
+                    seen_keys.add(row_key)
                 last_key = row_key
                 failures = 0
                 yield row

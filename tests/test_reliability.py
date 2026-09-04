@@ -191,18 +191,25 @@ class ReliabilityTest(unittest.TestCase):
                         yield Row("B")
                         raise IncompleteRead(b"", 1)
                     return interrupted()
+                if len(self.calls) == 2:
+                    def interrupted_again():
+                        yield Row("B")
+                        yield Row("C")
+                        raise IncompleteRead(b"", 1)
+                    return interrupted_again()
 
                 def resumed():
-                    yield Row("B")
                     yield Row("C")
+                    yield Row("D")
                 return resumed()
 
         couch = Couch()
         rows = list(scrape.iter_view_with_retries(
             couch, "_all_docs", 50, {}, initial_delay=0, sleep=lambda _: None,
             random_value=lambda: 0))
-        self.assertEqual(["A", "B", "C"], [row.id for row in rows])
+        self.assertEqual(["A", "B", "C", "D"], [row.id for row in rows])
         self.assertEqual("B", couch.calls[1]["startkey"])
+        self.assertEqual("C", couch.calls[2]["startkey"])
 
     def test_couch_iteration_aborts_after_retry_exhaustion(self):
         class Couch:
