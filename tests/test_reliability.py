@@ -10,6 +10,7 @@ from unittest.mock import Mock
 import slob
 from mw2slob import cli
 from mw2slob import core
+from mw2slob import convert
 from mw2slob import dump
 from mw2slob import scrape
 from mw2slob import siteinfo
@@ -26,6 +27,33 @@ from mw2slob.siteinfo import Info
 
 
 class ReliabilityTest(unittest.TestCase):
+    def convert_html(self, html):
+        params = convert.ConvertParams(
+            title="Article", aliases=(), text=html, rtl=False, server="https://example.test",
+            articlepath="/wiki/", site_articlepath="/wiki/", encoding="utf-8",
+            remove_embedded_bg="", ensure_ext_image_urls=False,
+        )
+        return convert.convert(params, (), {}, {}).decode("utf-8")
+
+    def test_upstream_html_serialization_and_image_priority(self):
+        converted = self.convert_html(
+            '<html><body class="article"><p>Text</p><img src="/image.png"></body></html>')
+        self.assertTrue(converted.startswith("<!DOCTYPE html>"))
+        self.assertIn('<body class="article">', converted)
+        self.assertNotIn("<div><body", converted)
+        self.assertIn('loading="lazy"', converted)
+        self.assertIn('fetchpriority="low"', converted)
+
+    def test_upstream_math_fallback_remains_supported(self):
+        converted = self.convert_html(
+            '<html><body><span class="mwe-math-element" '
+            'data-mw=\'{"body":{"extsrc":"x^2"}}\'>'
+            '<img class="mwe-math-fallback-image-inline" src="/math.png" alt="x²">'
+            '</span></body></html>')
+        self.assertIn(convert.MATH_JAX_SCRIPTS, converted)
+        self.assertIn('data-tex="x^2"', converted)
+        self.assertNotIn('src="/math.png"', converted)
+
     def test_retry_uses_exponential_backoff(self):
         calls = []
         delays = []
