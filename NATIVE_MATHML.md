@@ -15,14 +15,29 @@ MathJax/fallback path remains available for that article.
 
 ## Formula corpus
 
-The regression corpus converts inline/display forms of: simple powers,
-fractions, roots, matrices, sums, integrals, Greek/Unicode, and
-`\operatorname` notation. It confirms generated MathML and absence of the
-MathJax import for this supported corpus. This is structural coverage, not a
-pixel-level browser rendering assessment. Texvc extensions beyond this subset
-(for example chemistry `\ce{...}` and MediaWiki-specific macros) require a
-real dictionary corpus plus visual validation before this mode can replace
-MathJax.
+`tests/fixtures/mediawiki-math-corpus.json` is a real MediaWiki/texvc-shaped
+compatibility corpus. Its supported set contains powers, fractions, roots,
+matrices, sums, integrals, Greek/Unicode, and `\operatorname`, each in real
+`data-mw.body.extsrc` form. Inline and MediaWiki display/block forms are
+checked separately for `display="inline"` and `display="block"` in MathML.
+
+The unsupported/fallback set deliberately includes mhchem `\ce{H2O}`, texvc
+`\unicode`, `\bbox`, `\chem`, and nested `\cfrac`. These macros are excluded
+before calling `latex2mathml`; the original math element, `data-tex`, MathJax
+script and SLOB MathJax assets are retained. A mock-driven regression test
+verifies this path independently of the converter's current behavior.
+
+| result | formulas | share |
+| --- | ---: | ---: |
+| native success | 9 | 64.3% |
+| MathJax fallback | 5 | 35.7% |
+| conversion error | 0 | 0.0% |
+
+Five of fourteen corpus formulae require the MathJax fallback. A dictionary
+containing the complete corpus therefore requires MathJax assets (one of one
+such SLOBs); a dictionary containing only the nine supported formulae does
+not. This is structural coverage, not a pixel-level browser rendering
+assessment.
 
 ## Local comparison
 

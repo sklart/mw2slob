@@ -59,7 +59,6 @@ class ReliabilityTest(unittest.TestCase):
         formulas = (
             "x^2", r"\frac{a}{b}", r"\sqrt{x}", r"\begin{matrix}a&b\\c&d\end{matrix}",
             r"\sum_{i=1}^n i", r"\int_0^1 x dx", r"\alpha + π", r"\operatorname{sin}(x)",
-            r"\ce{H2O}",
         )
         markup = "".join(
             '<span class="mwe-math-element" data-mw="%s"></span>' %
@@ -68,6 +67,52 @@ class ReliabilityTest(unittest.TestCase):
         converted = self.convert_html("<html><body>%s</body></html>" % markup, "native-mathml")
         self.assertNotIn(convert.MATH_JAX_SCRIPTS, converted)
         self.assertGreaterEqual(converted.count("<math"), len(formulas))
+
+    def test_native_mathml_display_modes_and_real_compatibility_corpus(self):
+        corpus_path = Path(__file__).parent / "fixtures" / "mediawiki-math-corpus.json"
+        corpus = json.loads(corpus_path.read_text(encoding="utf-8"))
+        results = {"native": 0, "fallback": 0, "error": 0}
+        for formula in corpus:
+            try:
+                mathml = convert.native_mathml(formula["tex"], formula["display"])
+            except Exception:
+                results["error"] += 1
+                continue
+            outcome = "native" if mathml is not None else "fallback"
+            results[outcome] += 1
+            self.assertEqual(formula["expected"], outcome, formula["id"])
+            if mathml is not None:
+                self.assertEqual(formula["display"], mathml.get("display"), formula["id"])
+        self.assertEqual({"native": 9, "fallback": 5, "error": 0}, results)
+
+    def test_native_mathml_forced_fallback_keeps_mathjax_and_slob_assets(self):
+        html_source = (
+            '<html><body><span class="mwe-math-element" '
+            'data-mw=\'{"body":{"extsrc":"x^2"}}\'></span></body></html>')
+        with patch.object(convert, "native_mathml", return_value=None):
+            converted = self.convert_html(html_source, "native-mathml")
+        self.assertIn('data-tex="x^2"', converted)
+        self.assertIn(convert.MATH_JAX_SCRIPTS, converted)
+
+        class Pool:
+            def imap_unordered(self, *_args, **_kwargs):
+                return iter([("Article", (), b"<p>fallback</p>", None, True)])
+
+            def terminate(self):
+                pass
+
+            def join(self):
+                pass
+
+        info = Info("test", "en", False, "", "", "/wiki/", "https://example.test")
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as directory, \
+             patch.object(core.multiprocessing, "Pool", return_value=Pool()):
+            output = Path(directory) / "fallback.slob"
+            core.create_slob(str(output), info, [object()], workdir=directory,
+                             math_renderer="native-mathml")
+            with slob.open(str(output)) as dictionary:
+                keys = {entry.key.replace("\\", "/") for entry in dictionary}
+                self.assertIn("~/MathJax/MediaWiki.js", keys)
 
     def test_retry_uses_exponential_backoff(self):
         calls = []

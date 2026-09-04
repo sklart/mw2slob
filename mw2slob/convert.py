@@ -26,6 +26,7 @@ CSSSelector = functools.partial(CSSSelector, translator="html")
 
 log = logging.getLogger(__name__)
 NATIVE_MATH_FALLBACK = False
+NATIVE_UNSUPPORTED_TEXVC = re.compile(r"\\(?:ce|chem|unicode|mhchem|cfrac|bbox)\b")
 
 ConvertParams = collections.namedtuple(
     "ConvertParams",
@@ -470,6 +471,8 @@ def native_mathml(tex, display="inline"):
     ``None`` allows the caller to retain the existing fallback markup instead
     of turning one texvc extension into a failed article conversion.
     """
+    if NATIVE_UNSUPPORTED_TEXVC.search(tex):
+        return None
     try:
         from latex2mathml.converter import convert as latex_to_mathml
         return etree.fromstring(latex_to_mathml(tex, display=display).encode("utf-8"))

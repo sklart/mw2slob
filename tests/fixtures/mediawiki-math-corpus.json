@@ -1,0 +1,16 @@
+[
+  {"id": "power-inline", "tex": "x^2", "display": "inline", "expected": "native"},
+  {"id": "fraction", "tex": "\\frac{a}{b}", "display": "inline", "expected": "native"},
+  {"id": "root", "tex": "\\sqrt{x}", "display": "inline", "expected": "native"},
+  {"id": "matrix", "tex": "\\begin{matrix}a&b\\\\c&d\\end{matrix}", "display": "block", "expected": "native"},
+  {"id": "sum", "tex": "\\sum_{i=1}^n i", "display": "block", "expected": "native"},
+  {"id": "integral", "tex": "\\int_0^1 x\\,dx", "display": "block", "expected": "native"},
+  {"id": "greek-unicode", "tex": "\\alpha + π", "display": "inline", "expected": "native"},
+  {"id": "operatorname", "tex": "\\operatorname{sin}(x)", "display": "inline", "expected": "native"},
+  {"id": "mhchem", "tex": "\\ce{H2O}", "display": "inline", "expected": "fallback"},
+  {"id": "texvc-unicode", "tex": "\\unicode{x1D6FC}", "display": "inline", "expected": "fallback"},
+  {"id": "texvc-color-box", "tex": "\\bbox[5px,border:1px solid red]{x}", "display": "inline", "expected": "fallback"},
+  {"id": "texvc-chemical", "tex": "\\chem{H_2O}", "display": "inline", "expected": "fallback"},
+  {"id": "nested-cfrac", "tex": "\\cfrac{1}{1+\\cfrac{1}{x}}", "display": "block", "expected": "fallback"},
+  {"id": "rare-operator", "tex": "\\oiint_{S} \\vec{F}\\cdot d\\vec{S}", "display": "block", "expected": "native"}
+]
