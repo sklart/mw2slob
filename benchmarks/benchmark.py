@@ -81,23 +81,34 @@ class ProcessTreeSampler:
 
 
 class StageObserver:
-    EVENTS = {
-        "sorting_total": ("begin_sort", "end_sort"),
-        "alias_resolve_total": ("begin_resolve_aliases", "end_resolve_aliases"),
-        "finalization_total": ("begin_finalize", "end_finalize"),
-    }
-
     def __init__(self):
         self.timings = {}
         self._active = {}
+        self._alias_depth = 0
 
     def __call__(self, event):
         now = time.perf_counter()
-        for stage, (begin, end) in self.EVENTS.items():
-            if event.name == begin:
-                self._active.setdefault(stage, []).append(now)
-            elif event.name == end and self._active.get(stage):
-                self.timings[stage] = self.timings.get(stage, 0.0) + now - self._active[stage].pop()
+        if event.name == "begin_finalize":
+            self._begin("finalization_total", now)
+        elif event.name == "end_finalize":
+            self._end("finalization_total", now)
+        elif event.name == "begin_resolve_aliases":
+            self._alias_depth += 1
+            self._begin("alias_resolve_total", now)
+        elif event.name == "end_resolve_aliases":
+            self._end("alias_resolve_total", now)
+            self._alias_depth -= 1
+        elif event.name == "begin_sort":
+            self._begin("sorting_inside_alias" if self._alias_depth else "sorting_outside_alias", now)
+        elif event.name == "end_sort":
+            self._end("sorting_inside_alias" if self._alias_depth else "sorting_outside_alias", now)
+
+    def _begin(self, stage, now):
+        self._active.setdefault(stage, []).append(now)
+
+    def _end(self, stage, now):
+        if self._active.get(stage):
+            self.timings[stage] = self.timings.get(stage, 0.0) + now - self._active[stage].pop()
 
 
 class TimedArticles:
@@ -173,14 +184,15 @@ def run_benchmark(output_dir, articles, jobs, chunksize, heavy=False, no_math=Fa
         "html_conversion_aggregate_worker_seconds": timings.get("html_conversion_worker", 0.0),
         "writer_add": timings.get("writer_add", 0.0),
         "static_assets": timings.get("static_assets", 0.0),
-        "sorting_total": observer.timings.get("sorting_total", 0.0),
+        "sorting_outside_alias": observer.timings.get("sorting_outside_alias", 0.0),
+        "sorting_inside_alias": observer.timings.get("sorting_inside_alias", 0.0),
         "alias_resolve_total": observer.timings.get("alias_resolve_total", 0.0),
         "finalization_total": observer.timings.get("finalization_total", 0.0),
         "pool_shutdown": timings.get("pool_shutdown", 0.0),
     }
     result["finalization_other"] = max(
-        0.0, result["finalization_total"] - result["sorting_total"]
-        - result["alias_resolve_total"],
+        0.0, result["finalization_total"] - result["alias_resolve_total"]
+        - result["sorting_outside_alias"],
     )
     result.update(process_metrics)
     # Aggregate worker CPU and wall-clock stages overlap, so the residual is

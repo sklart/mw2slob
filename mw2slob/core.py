@@ -183,7 +183,7 @@ def run(
                     if aliases:
                         keys += aliases
                     try:
-                        writer_started = time.perf_counter()
+                        writer_started = time.perf_counter() if benchmark_timing else None
                         slb.add(text, *keys, content_type=html_content_type)
                         if benchmark_timing and timings is not None:
                             timings["writer_add"] = timings.get(

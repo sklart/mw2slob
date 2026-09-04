@@ -26,11 +26,14 @@ normal conversion neither calls timing functions nor sends timing values over
 the multiprocessing queue.
 
 Stages are source read, pool startup, aggregate worker HTML conversion, writer
-`add`, static assets, finalization, and pool shutdown. `sorting_total` and
-`alias_resolve_total` are nested within `finalization_total`; therefore they
-must never be added to it. `finalization_other` is the non-overlapping
-remainder. `unattributed_overhead` is only an explicitly unassigned wall-clock
-residual, not a measurement of IPC overhead.
+`add`, static assets, finalization, and pool shutdown. `static_assets` measures
+`slob.add_dir()` before `slb.finalize()`; it is not part of
+`finalization_total`. `sorting_outside_alias` is the initial sort in
+finalization. `sorting_inside_alias` is included in `alias_resolve_total`, so
+the non-overlapping equation is
+`finalization_other = finalization_total - alias_resolve_total - sorting_outside_alias`.
+`unattributed_overhead` is only an explicitly unassigned wall-clock residual,
+not a measurement of IPC overhead.
 
 Full local matrix, Windows / Python 3.11 / MathJax enabled / 1,000 articles.
 CPU and RSS cover the process tree; RSS is its peak. Results are rounded.
@@ -67,14 +70,27 @@ setting: it is within 1% of the fastest row (`2/10`), while avoiding a very
 small task batch. Do not make it a project-wide default until this matrix has
 been reproduced on a representative build host.
 
-The confirmed bottlenecks are (1) HTML conversion, whose aggregate worker CPU
-was 0.40–0.81 s per 1,000 articles; (2) process creation/memory pressure,
-shown by `auto` reaching 741–785 MiB without throughput benefit; and (3)
-finalization, where the measured total is about 0.17–0.26 s and includes
-sorting, alias resolution, static assets and output assembly. These figures do
-not prove an IPC bottleneck. No parser, compression, mmap, or codec change is
-proposed without a before/after row containing baseline, speedup, RAM delta,
-and output-size delta.
+Representative stage breakdown, same host, 1,000 articles, `jobs=2`,
+`chunksize=25`, MathJax enabled:
+
+| stage | elapsed, s | interpretation |
+| --- | ---: | --- |
+| source_read | 0.027 | JSONL fixture iteration |
+| pool_startup | 0.031 | worker process startup |
+| html_conversion | 0.405 | aggregate worker CPU time; overlaps wall time |
+| writer_add | 0.034 | parent-side SLOB writes |
+| static_assets | 2.482 | `add_dir()` before finalization; MathJax dominates this fixture |
+| finalization_total | 0.198 | includes `sorting_outside_alias` 0.037 and `alias_resolve_total` 0.067 |
+| pool_shutdown | 0.010 | terminate/join workers |
+| unattributed_overhead | 0.520 | residual only, not evidence of IPC cost |
+| total | 3.302 | wall-clock end to end |
+
+The measured priorities are static asset ingestion (particularly bundled
+MathJax), HTML conversion, and process/memory pressure: `auto` reached
+741–785 MiB without a throughput gain. The residual is deliberately not named
+as a bottleneck. No parser, compression, mmap, or codec change is proposed
+without a before/after row containing baseline, speedup, RAM delta, and
+output-size delta.
 
 ## Profiling
 
