@@ -26,7 +26,7 @@ jobs:
           python -m pip install -e ./slob --no-deps
           python -m pip install PyICU
           python -m pip install -e ./mw2slob --no-deps
-          python -m pip install CouchDB cssselect cssutils encutils more-itertools beautifulsoup4 lxml lxml_html_clean psutil
+          python -m pip install CouchDB cssselect cssutils encutils more-itertools beautifulsoup4 lxml lxml_html_clean psutil latex2mathml
       - name: Run reliability tests
         working-directory: mw2slob
         run: python -m unittest discover -s tests -v

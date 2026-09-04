@@ -74,11 +74,14 @@ SELECTORS = []
 INTERWIKI: Mapping[str, str] = {}
 NAMESPACES: Mapping[str, str] = {}
 BENCHMARK_TIMING = False
+MATH_RENDERER = "mathjax"
 
 
-def process_initializer(css_selectors, interwikimap, namespaces, benchmark_timing=False):
-    global BENCHMARK_TIMING
+def process_initializer(css_selectors, interwikimap, namespaces, benchmark_timing=False,
+                        math_renderer="mathjax"):
+    global BENCHMARK_TIMING, MATH_RENDERER
     BENCHMARK_TIMING = benchmark_timing
+    MATH_RENDERER = math_renderer
     logging.basicConfig()
     for css_selector in css_selectors:
         if ":contains(" in css_selector:
@@ -118,7 +121,7 @@ def safe_convert(
         if text is None:
             result = (title, aliases, b"", None)
             return result + (time.perf_counter() - started,) if BENCHMARK_TIMING else result
-        html = convert.convert(params, SELECTORS, NAMESPACES, INTERWIKI)
+        html = convert.convert(params, SELECTORS, NAMESPACES, INTERWIKI, MATH_RENDERER)
         result = (title, aliases, html, None)
         return result + (time.perf_counter() - started,) if BENCHMARK_TIMING else result
     except KeyboardInterrupt:
@@ -145,13 +148,14 @@ def run(
     timings=None,
     benchmark_timing=False,
     process_sampler=None,
+    math_renderer="mathjax",
 ):
     stats = stats or Stats()
     pool_started = time.perf_counter() if benchmark_timing else None
     pool = multiprocessing.Pool(
         jobs,
         process_initializer,
-        [filters, interwikimap, namespaces, benchmark_timing],
+        [filters, interwikimap, namespaces, benchmark_timing, math_renderer],
     )
     if benchmark_timing and timings is not None:
         timings["pool_startup"] = time.perf_counter() - pool_started
@@ -244,6 +248,7 @@ def create_slob(
     timings=None,
     benchmark_timing=False,
     process_sampler=None,
+    math_renderer="mathjax",
 ):
     stats = stats or Stats()
     temporary_outname = outname + ".tmp"
@@ -275,11 +280,12 @@ def create_slob(
         run(slb, articles, filters, info.interwikimap, info.namespaces, html_encoding,
             reporter=reporter, stats=stats, jobs=jobs, chunksize=chunksize,
             verbose=verbose, source=info.server, timings=timings,
-            benchmark_timing=benchmark_timing, process_sampler=process_sampler)
+            benchmark_timing=benchmark_timing, process_sampler=process_sampler,
+            math_renderer=math_renderer)
 
         include_built_in = {"js", "css", "images"}
 
-        if not no_math:
+        if not no_math and math_renderer == "mathjax":
             include_built_in.add("MathJax")
 
         content_dir = os.path.dirname(__file__)

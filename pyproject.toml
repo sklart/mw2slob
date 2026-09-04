@@ -23,6 +23,7 @@ dependencies = [
 
 [project.optional-dependencies]
 benchmark = ["psutil"]
+native-mathml = ["latex2mathml"]
 
 [project.urls]
 Homepage = "http://github.com/itkach/mw2slob"

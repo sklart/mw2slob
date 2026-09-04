@@ -15,6 +15,7 @@ from urllib.parse import urlunparse
 import cssutils
 import lxml.html
 import lxml.html.clean
+from lxml import etree
 from lxml.cssselect import CSSSelector
 from lxml.html import builder as E
 from lxml.html.soupparser import fromstring
@@ -461,11 +462,26 @@ def wrap_rtl(text):
     return f'<div dir="rtl" class="rtl">{text}</div>'
 
 
+def native_mathml(tex, display="inline"):
+    """Return MathML for a TeX fragment, or ``None`` for an unsupported one.
+
+    This is deliberately an experiment-only adapter.  Keeping failures as
+    ``None`` allows the caller to retain the existing fallback markup instead
+    of turning one texvc extension into a failed article conversion.
+    """
+    try:
+        from latex2mathml.converter import convert as latex_to_mathml
+        return etree.fromstring(latex_to_mathml(tex, display=display).encode("utf-8"))
+    except (ImportError, ValueError, etree.XMLSyntaxError):
+        return None
+
+
 def convert(
     params: ConvertParams,
     filters: Iterable,
     namespaces: Mapping[str, str],
     interwiki: Mapping[str, str],
+    math_renderer="mathjax",
 ):
     (
         title,
@@ -599,6 +615,22 @@ def convert(
         item.attrib.pop("title")
 
     has_math = len(SEL_MATH(doc)) > 0
+
+    if has_math and math_renderer == "native-mathml":
+        remaining_math = False
+        for item in list(SEL_MATH(doc)):
+            tex = item.attrib.get("data-tex") or item.attrib.get("alt")
+            if not tex:
+                continue
+            display = "block" if "display" in item.attrib.get("class", "") else "inline"
+            mathml = native_mathml(tex, display)
+            if mathml is not None and item.getparent() is not None:
+                item.getparent().replace(item, mathml)
+            else:
+                remaining_math = True
+        # Unsupported texvc syntax keeps the established MathJax/fallback
+        # path for that article rather than producing broken mathematics.
+        has_math = remaining_math
 
     if has_math:
         # Modern math: MediaWiki.js replaces the whole span.mwe-math-element

@@ -1,3 +1,4 @@
+import html
 import json
 import tempfile
 import unittest
@@ -27,13 +28,13 @@ from mw2slob.siteinfo import Info
 
 
 class ReliabilityTest(unittest.TestCase):
-    def convert_html(self, html):
+    def convert_html(self, html, math_renderer="mathjax"):
         params = convert.ConvertParams(
             title="Article", aliases=(), text=html, rtl=False, server="https://example.test",
             articlepath="/wiki/", site_articlepath="/wiki/", encoding="utf-8",
             remove_embedded_bg="", ensure_ext_image_urls=False,
         )
-        return convert.convert(params, (), {}, {}).decode("utf-8")
+        return convert.convert(params, (), {}, {}, math_renderer).decode("utf-8")
 
     def test_upstream_html_serialization_and_image_priority(self):
         converted = self.convert_html(
@@ -53,6 +54,20 @@ class ReliabilityTest(unittest.TestCase):
         self.assertIn(convert.MATH_JAX_SCRIPTS, converted)
         self.assertIn('data-tex="x^2"', converted)
         self.assertNotIn('src="/math.png"', converted)
+
+    def test_native_mathml_experiment_converts_representative_tex(self):
+        formulas = (
+            "x^2", r"\frac{a}{b}", r"\sqrt{x}", r"\begin{matrix}a&b\\c&d\end{matrix}",
+            r"\sum_{i=1}^n i", r"\int_0^1 x dx", r"\alpha + π", r"\operatorname{sin}(x)",
+            r"\ce{H2O}",
+        )
+        markup = "".join(
+            '<span class="mwe-math-element" data-mw="%s"></span>' %
+            html.escape(json.dumps({"body": {"extsrc": formula}}), quote=True)
+            for formula in formulas)
+        converted = self.convert_html("<html><body>%s</body></html>" % markup, "native-mathml")
+        self.assertNotIn(convert.MATH_JAX_SCRIPTS, converted)
+        self.assertGreaterEqual(converted.count("<math"), len(formulas))
 
     def test_retry_uses_exponential_backoff(self):
         calls = []

@@ -74,6 +74,7 @@ def run(outname, info, articles, args):
             html_encoding=args.html_encoding, tags=tags, filters=filters,
             reporter=reporter, stats=Stats(), jobs=args.jobs,
             chunksize=args.chunksize, verbose=args.verbose,
+            math_renderer=args.math_renderer,
         )
 
 
@@ -335,6 +336,10 @@ def arg_parser():
             "Do not include MathJax resources into dictionary "
             "(articles do not use math markup)"
         ),
+    )
+    base_parser.add_argument(
+        "--math-renderer", choices=("mathjax", "native-mathml"), default="mathjax",
+        help="Math rendering mode (experimental native-mathml keeps MathJax as the default)",
     )
 
     parser_dump = subparsers.add_parser(

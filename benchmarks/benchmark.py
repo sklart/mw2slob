@@ -133,7 +133,9 @@ class TimedArticles:
 def fixture_record(index, heavy=False):
     title = "Статья {} — ёж".format(index) if index % 17 == 0 else "Article {}".format(index)
     css = "<style>.note{color:red;padding:4px}.x{font-weight:bold}</style>" if index % 5 == 0 else ""
-    math = "<span class=\"mwe-math-element\" data-mw=\"{}\">x² + y²</span>" if index % 11 == 0 else ""
+    math = ("<span class=\"mwe-math-element\" "
+            "data-mw=\"{&quot;body&quot;:{&quot;extsrc&quot;:&quot;x^2 + y^2&quot;}}\">x² + y²</span>"
+            if index % 11 == 0 else "")
     repeated = ("<p class=\"note\">Heavy HTML <b>content</b> <a href=\"/wiki/Target\">Target</a>.</p>" * 20
                 if heavy else "<p class=\"note\">HTML <b>content</b> <a href=\"/wiki/Target\">Target</a>.</p>")
     return {
@@ -149,7 +151,8 @@ def write_fixture(path, count, heavy=False):
             output.write(json.dumps(fixture_record(index, heavy), ensure_ascii=False) + "\n")
 
 
-def run_benchmark(output_dir, articles, jobs, chunksize, heavy=False, no_math=False):
+def run_benchmark(output_dir, articles, jobs, chunksize, heavy=False, no_math=False,
+                  math_renderer="mathjax"):
     output_dir.mkdir(parents=True, exist_ok=True)
     fixture = output_dir / "fixture-{}.jsonl".format(articles)
     output = output_dir / "output.slob"
@@ -165,7 +168,7 @@ def run_benchmark(output_dir, articles, jobs, chunksize, heavy=False, no_math=Fa
         core.create_slob(
             str(output), info, timed_articles, workdir=str(output_dir), no_math=no_math,
             jobs=jobs, chunksize=chunksize, observer=observer, timings=timings,
-            benchmark_timing=True, process_sampler=sampler,
+            benchmark_timing=True, process_sampler=sampler, math_renderer=math_renderer,
         )
     finally:
         process_metrics = sampler.stop()
@@ -175,7 +178,8 @@ def run_benchmark(output_dir, articles, jobs, chunksize, heavy=False, no_math=Fa
         "jobs": jobs if jobs is not None else "auto",
         "chunksize": chunksize,
         "heavy": heavy,
-        "mathjax": not no_math,
+        "mathjax": not no_math and math_renderer == "mathjax",
+        "math_renderer": math_renderer,
         "total": total,
         "articles_per_second": articles / total if total else 0.0,
         "output_bytes": output.stat().st_size,
@@ -213,6 +217,7 @@ def main():
     parser.add_argument("--chunksize", type=int, default=100, choices=(1, 10, 25, 50, 100, 250, 500))
     parser.add_argument("--heavy", action="store_true")
     parser.add_argument("--no-math", action="store_true")
+    parser.add_argument("--math-renderer", choices=("mathjax", "native-mathml"), default="mathjax")
     parser.add_argument("--output-dir", type=Path, default=Path("benchmark-output"))
     parser.add_argument("--smoke", action="store_true", help="Run the short offline CI benchmark")
     args = parser.parse_args()
@@ -223,7 +228,8 @@ def main():
         args.no_math = True
     jobs = None if args.jobs == "auto" else int(args.jobs)
     result = run_benchmark(args.output_dir, args.articles, jobs, args.chunksize,
-                           heavy=args.heavy, no_math=args.no_math)
+                           heavy=args.heavy, no_math=args.no_math,
+                           math_renderer=args.math_renderer)
     print(json.dumps(result, indent=2, sort_keys=True))
 
 
