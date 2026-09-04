@@ -10,6 +10,7 @@ import couchdb
 
 from . import convert
 from . import siteinfo as si
+from .reliability import retry
 
 log = logging.getLogger(__name__)
 
@@ -21,12 +22,15 @@ def grouper(iterable, n, fillvalue=None):
     return itertools.zip_longest(fillvalue=fillvalue, *args)
 
 
-def mkcouch(couch_url) -> Tuple[couchdb.Database, couchdb.Database]:
+def mkcouch(couch_url, attempts=3, initial_delay=1.0) -> Tuple[couchdb.Database, couchdb.Database]:
     parsed_url = urlparse(couch_url)
     couch_db = parsed_url.path.lstrip("/")
     server_url = parsed_url.scheme + "://" + parsed_url.netloc
-    server = couchdb.Server(server_url)
-    return server[couch_db], server["siteinfo"]
+    def connect():
+        server = couchdb.Server(server_url)
+        return server[couch_db], server["siteinfo"]
+
+    return retry(connect, attempts=attempts, initial_delay=initial_delay)
 
 
 def articles(

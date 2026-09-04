@@ -7,8 +7,10 @@ from typing import Mapping
 from typing import Set
 from urllib.parse import urlencode
 
+from .reliability import retry
 
-def get(mw_site, api_path="/w/api.php"):
+
+def get(mw_site, api_path="/w/api.php", attempts=3, initial_delay=1.0):
     params = {
         "action": "query",
         "meta": "siteinfo",
@@ -20,9 +22,12 @@ def get(mw_site, api_path="/w/api.php"):
 
     headers = {"User-Agent": "mw2slob"}
     req = urllib.request.Request(url, headers=headers)
-    with urllib.request.urlopen(req) as response:
-        data = json.load(response)
-        return data["query"]
+    def request():
+        with urllib.request.urlopen(req) as response:
+            data = json.load(response)
+            return data["query"]
+
+    return retry(request, attempts=attempts, initial_delay=initial_delay)
 
 
 def add_http(url):

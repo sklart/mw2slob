@@ -14,6 +14,7 @@ import slob
 
 from . import convert
 from . import siteinfo as si
+from .reliability import ConversionError, SourceError, Stats, WriterError
 
 times = {}
 
@@ -128,7 +129,10 @@ def run(
     interwikimap: Iterable[Mapping[str, str]],
     namespaces: Mapping[str, dict],
     html_encoding: str,
+    reporter=None,
+    stats=None,
 ):
+    stats = stats or Stats()
     pool = multiprocessing.Pool(
         None,
         process_initializer,
@@ -139,20 +143,36 @@ def run(
         resulti = pool.imap_unordered(safe_convert, articles, chunksize=100)
         for title, aliases, text, error in resulti:
             if error:
-                print(f"F {title}")
+                failure = ConversionError(error)
+                stats.conversion_errors += 1
+                if reporter:
+                    reporter.record("conversion", failure, title)
             else:
                 if text:
                     keys = [title]
                     if aliases:
                         keys += aliases
-                    slb.add(text, *keys, content_type=html_content_type)
-                    print(f"S {title} ({len(text)})")
+                    try:
+                        slb.add(text, *keys, content_type=html_content_type)
+                    except Exception as error:
+                        stats.writer_errors += 1
+                        failure = WriterError("failed to write {!r}: {}".format(title, error))
+                        if reporter:
+                            reporter.record("writer", failure, title)
+                        raise failure from error
+                    stats.written += 1
                 else:
-                    print(f"E {title}")
+                    stats.empty += 1
     except KeyboardInterrupt:
         log.warn("User interrupted")
-    except:
-        log.exception("")
+        raise
+    except Exception as error:
+        if not isinstance(error, (ConversionError, WriterError)):
+            stats.source_errors += 1
+            failure = SourceError("source iteration failed: {}".format(error))
+            if reporter:
+                reporter.record("source", failure)
+            raise failure from error
         raise
     finally:
         pool.terminate()
@@ -171,15 +191,18 @@ def create_slob(
     tags: Optional[Mapping[str, str]] = None,
     html_encoding=Defaults.html_encoding,
     filters: Iterable[str] = (),
+    reporter=None,
+    stats=None,
 ):
-
-    with slob.create(
+    stats = stats or Stats()
+    slb = slob.create(
         outname,
         compression=compression,
         workdir=workdir,
         min_bin_size=min_bin_size * 1024,
         observer=observer,
-    ) as slb:
+    )
+    try:
         begin("content")
         # create tags
         slb.tag("license.name", "")
@@ -194,7 +217,8 @@ def create_slob(
             for (name, value) in tags.items():
                 slb.tag(name, value)
 
-        run(slb, articles, filters, info.interwikimap, info.namespaces, html_encoding)
+        run(slb, articles, filters, info.interwikimap, info.namespaces, html_encoding,
+            reporter=reporter, stats=stats)
 
         include_built_in = {"js", "css", "images"}
 
@@ -202,9 +226,23 @@ def create_slob(
             include_built_in.add("MathJax")
 
         content_dir = os.path.dirname(__file__)
-        slob.add_dir(slb, content_dir, include_only=include_built_in, prefix="~/")
-        if content_dirs:
-            for content_dir in content_dirs:
-                slob.add_dir(slb, content_dir)
-
-    p("\nAll done in %s\n" % end("all"))
+        try:
+            slob.add_dir(slb, content_dir, include_only=include_built_in, prefix="~/")
+            if content_dirs:
+                for content_dir in content_dirs:
+                    slob.add_dir(slb, content_dir)
+            slb.finalize()
+        except Exception as error:
+            if not isinstance(error, (SourceError, WriterError)):
+                stats.writer_errors += 1
+                failure = WriterError("finalization failed: {}".format(error))
+                if reporter:
+                    reporter.record("writer", failure)
+                raise failure from error
+            raise
+    finally:
+        if not getattr(slb, "_finalized", False):
+            slb.tmpdir.cleanup()
+        p("\n{}\n".format(stats.summary()))
+        p("All done in %s\n" % end("all"))
+    return stats

@@ -12,6 +12,7 @@ from typing import Union
 
 from . import convert
 from . import siteinfo as si
+from .reliability import SourceError
 
 log = logging.getLogger(__name__)
 
@@ -119,7 +120,6 @@ def articles(
                         title = data["name"]
                         redirects = data.get("redirects", ())
                         aliases = [r["name"] for r in redirects]
-                        print(f"{file_number}:{line_number} {title} ({len(html)})")
                         yield convert.ConvertParams(
                             title=title,
                             aliases=aliases,
@@ -132,5 +132,7 @@ def articles(
                             remove_embedded_bg=remove_embedded_bg,
                             ensure_ext_image_urls=ensure_ext_image_urls,
                         )
-                    except:
-                        log.exception(f"Failed to read line {i}")
+                    except Exception as error:
+                        raise SourceError(
+                            "invalid dump record at {}:{}".format(file_number, line_number)
+                        ) from error

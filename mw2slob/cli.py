@@ -9,6 +9,7 @@ from . import core
 from . import dump
 from . import scrape
 from . import siteinfo
+from .reliability import ErrorReporter, Stats
 
 
 def cli_siteinfo(args):
@@ -65,19 +66,14 @@ def get_filters(args):
 def run(outname, info, articles, args):
     tags = get_tags(args, info)
     filters = get_filters(args)
-    core.create_slob(
-        outname,
-        info,
-        articles,
-        content_dirs=args.content_dirs,
-        compression=args.compression,
-        workdir=args.workdir,
-        min_bin_size=args.bin_size,
-        no_math=args.no_math,
-        html_encoding=args.html_encoding,
-        tags=tags,
-        filters=filters,
-    )
+    with ErrorReporter(args.errors_file) as reporter:
+        core.create_slob(
+            outname, info, articles, content_dirs=args.content_dirs,
+            compression=args.compression, workdir=args.workdir,
+            min_bin_size=args.bin_size, no_math=args.no_math,
+            html_encoding=args.html_encoding, tags=tags, filters=filters,
+            reporter=reporter, stats=Stats(),
+        )
 
 
 def cli_dump(args):
@@ -154,6 +150,11 @@ def arg_parser():
 
     base_parser.add_argument(
         "-o", "--output-file", type=str, help="Name of output slob file"
+    )
+
+    base_parser.add_argument(
+        "--errors-file", default="errors.jsonl",
+        help="Write source, conversion, and writer errors as JSON Lines (default: %(default)s)",
     )
 
     base_parser.add_argument(
