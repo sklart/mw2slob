@@ -25,6 +25,7 @@ EM = E.ElementMaker()
 CSSSelector = functools.partial(CSSSelector, translator="html")
 
 log = logging.getLogger(__name__)
+NATIVE_MATH_FALLBACK = False
 
 ConvertParams = collections.namedtuple(
     "ConvertParams",
@@ -483,6 +484,8 @@ def convert(
     interwiki: Mapping[str, str],
     math_renderer="mathjax",
 ):
+    global NATIVE_MATH_FALLBACK
+    NATIVE_MATH_FALLBACK = False
     (
         title,
         _,
@@ -631,6 +634,7 @@ def convert(
         # Unsupported texvc syntax keeps the established MathJax/fallback
         # path for that article rather than producing broken mathematics.
         has_math = remaining_math
+        NATIVE_MATH_FALLBACK = remaining_math
 
     if has_math:
         # Modern math: MediaWiki.js replaces the whole span.mwe-math-element

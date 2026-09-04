@@ -123,6 +123,8 @@ def safe_convert(
             return result + (time.perf_counter() - started,) if BENCHMARK_TIMING else result
         html = convert.convert(params, SELECTORS, NAMESPACES, INTERWIKI, MATH_RENDERER)
         result = (title, aliases, html, None)
+        if MATH_RENDERER == "native-mathml":
+            result += (convert.NATIVE_MATH_FALLBACK,)
         return result + (time.perf_counter() - started,) if BENCHMARK_TIMING else result
     except KeyboardInterrupt:
         raise
@@ -164,7 +166,10 @@ def run(
         resulti = pool.imap_unordered(safe_convert, articles, chunksize=chunksize)
         for result in resulti:
             title, aliases, text, error = result[:4]
-            conversion_elapsed = result[4] if benchmark_timing else 0.0
+            needs_mathjax = len(result) > 4 and math_renderer == "native-mathml" and result[4]
+            conversion_elapsed = result[-1] if benchmark_timing else 0.0
+            if needs_mathjax:
+                stats.native_math_fallback = True
             if benchmark_timing and timings is not None:
                 timings["html_conversion_worker"] = timings.get(
                     "html_conversion_worker", 0.0) + conversion_elapsed
@@ -285,7 +290,7 @@ def create_slob(
 
         include_built_in = {"js", "css", "images"}
 
-        if not no_math and math_renderer == "mathjax":
+        if not no_math and (math_renderer == "mathjax" or getattr(stats, "native_math_fallback", False)):
             include_built_in.add("MathJax")
 
         content_dir = os.path.dirname(__file__)
