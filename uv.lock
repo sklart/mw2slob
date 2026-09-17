@@ -344,7 +344,7 @@ requires-dist = [
     { name = "cssutils" },
     { name = "lxml" },
     { name = "lxml-html-clean" },
-    { name = "slob", git = "https://github.com/itkach/slob.git" },
+    { name = "slob", git = "https://github.com/sklart/slob.git" },
 ]
 
 [[package]]
@@ -356,7 +356,7 @@ sdist = { url = "https://files.pythonhosted.org/packages/b7/d5/354eb1bf84dcf4ab0
 [[package]]
 name = "slob"
 version = "1.0.2"
-source = { git = "https://github.com/itkach/slob.git#a05d1b69f0d1b94ee10ea39fa40ac7f6a621990b" }
+source = { git = "https://github.com/sklart/slob.git" }
 dependencies = [
     { name = "pyicu" },
 ]
