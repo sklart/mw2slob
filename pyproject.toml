@@ -12,7 +12,7 @@ requires-python = ">=3.9"
 # `pip install`, `uv sync`, and `uvx --from git+...` all resolve the
 # full dependency graph with no separate manual step.
 dependencies = [
-    "slob @ git+https://github.com/itkach/slob.git",
+    "slob @ git+https://github.com/sklart/slob.git",
     "lxml",
     "CouchDB",
     "cssselect",
