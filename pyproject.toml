@@ -47,3 +47,8 @@ mw2slob = ["css/**/*", "js/**/*", "images/**/*", "filters/**/*", "MathJax/**/*"]
 # git+..., pip install git+...) fetch enough history for this to work
 # without extra configuration.
 [tool.setuptools_scm]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.16.9",
+]
