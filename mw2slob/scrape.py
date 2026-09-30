@@ -21,7 +21,7 @@ def grouper(iterable, n, fillvalue=None):
     "Collect data into fixed-length chunks or blocks"
     # grouper('ABCDEFG', 3, 'x') --> ABC DEF Gxx
     args = [iter(iterable)] * n
-    return itertools.zip_longest(fillvalue=fillvalue, *args)
+    return itertools.zip_longest(*args, fillvalue=fillvalue)
 
 
 def mkcouch(couch_url, attempts=3, initial_delay=1.0) -> Tuple[couchdb.Database, couchdb.Database]:

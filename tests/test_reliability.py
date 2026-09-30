@@ -14,9 +14,7 @@ from mw2slob import core
 from mw2slob import convert
 from mw2slob import dump
 from mw2slob import scrape
-from mw2slob import siteinfo
 from mw2slob.reliability import (
-    ConversionError,
     ConversionFailure,
     ErrorReporter,
     SourceError,
